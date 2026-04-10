@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,16 +13,30 @@ DB_PATH = Path(__file__).resolve().parent / "pantry.db"
 SETTINGS = {
     "LOW_STOCK_THRESHOLD": 5,
 }
+ITEM_CATEGORIES = ["Canned Goods", "Frozen Food", "Snacks", "Meals"]
+
+_local = threading.local()
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys = ON;")
+        _local.conn = conn
     return conn
 
 
+_db_initialized = False
+
+
 def init_db() -> None:
+    global _db_initialized
+    if _db_initialized:
+        return
+
     with get_connection() as conn:
         conn.execute(
             """
@@ -29,11 +44,16 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 barcode TEXT NOT NULL UNIQUE,
                 name TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'Uncategorized',
                 unit TEXT NOT NULL DEFAULT 'units',
                 quantity INTEGER NOT NULL DEFAULT 0
             );
             """
         )
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(items)").fetchall()]
+        if "category" not in cols:
+            conn.execute("ALTER TABLE items ADD COLUMN category TEXT NOT NULL DEFAULT 'Uncategorized'")
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS transactions (
@@ -47,6 +67,7 @@ def init_db() -> None:
             );
             """
         )
+    _db_initialized = True
 
 
 def get_dashboard_totals() -> dict[str, int]:
@@ -61,17 +82,17 @@ def get_dashboard_totals() -> dict[str, int]:
     }
 
 
-def add_item(name: str, barcode: str, unit: str, initial_quantity: int = 0, notes: str = "") -> int:
+def add_item(name: str, barcode: str, unit: str, category: str = "Uncategorized", initial_quantity: int = 0, notes: str = "") -> int:
     if initial_quantity < 0:
         raise ValueError("Initial quantity must be 0 or greater.")
 
     with get_connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO items (barcode, name, unit, quantity)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO items (barcode, name, category, unit, quantity)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (barcode.strip(), name.strip(), unit.strip() or "units", initial_quantity),
+            (barcode.strip(), name.strip(), category.strip() or "Uncategorized", unit.strip() or "units", initial_quantity),
         )
         item_id = int(cursor.lastrowid)
 
@@ -89,7 +110,7 @@ def add_item(name: str, barcode: str, unit: str, initial_quantity: int = 0, note
 def get_all_items() -> pd.DataFrame:
     with get_connection() as conn:
         df = pd.read_sql_query(
-            "SELECT id, barcode, name, unit, quantity FROM items ORDER BY name COLLATE NOCASE",
+            "SELECT id, barcode, name, category, unit, quantity FROM items ORDER BY name COLLATE NOCASE",
             conn,
         )
     return df
@@ -98,7 +119,7 @@ def get_all_items() -> pd.DataFrame:
 def get_item_by_barcode(barcode: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, barcode, name, unit, quantity FROM items WHERE barcode = ?",
+            "SELECT id, barcode, name, category, unit, quantity FROM items WHERE barcode = ?",
             (barcode.strip(),),
         ).fetchone()
     return dict(row) if row else None
@@ -107,10 +128,30 @@ def get_item_by_barcode(barcode: str) -> dict[str, Any] | None:
 def get_item_lookup() -> pd.DataFrame:
     with get_connection() as conn:
         df = pd.read_sql_query(
-            "SELECT id, name, barcode, unit, quantity FROM items ORDER BY name COLLATE NOCASE",
+            "SELECT id, name, barcode, category, unit, quantity FROM items ORDER BY name COLLATE NOCASE",
             conn,
         )
     return df
+
+
+def update_item(item_id: int, name: str, barcode: str, unit: str, category: str = "Uncategorized") -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE items
+            SET name = ?, barcode = ?, unit = ?, category = ?
+            WHERE id = ?
+            """,
+            (name.strip(), barcode.strip(), unit.strip() or "units", category.strip() or "Uncategorized", item_id),
+        )
+
+
+def delete_item(item_id: int) -> None:
+    with get_connection() as conn:
+        row = conn.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+        if row is None:
+            raise ValueError("Item not found.")
+        conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
 
 
 def record_transaction(item_id: int, tx_type: str, quantity: int, notes: str = "") -> None:

@@ -3,12 +3,11 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
-from database import get_item_lookup, get_transactions, init_db
+from database import get_item_lookup, get_transactions
+from ui.components import render_page_header
 
 
-init_db()
-st.title("Transaction History")
-st.caption("View and filter all inventory in/out transactions.")
+render_page_header("Transaction History", "Audit all inventory actions across check-outs and receipts.")
 
 items_df = get_item_lookup()
 
@@ -21,10 +20,16 @@ with col1:
 
 with col2:
     item_option_labels = ["All items"] + [f"{row['name']} ({row['barcode']})" for _, row in items_df.iterrows()]
-    selected_item_label = st.selectbox("Item", item_option_labels)
+    default_item_label = "All items"
+    history_filter_id = st.session_state.get("history_item_filter")
+    if history_filter_id is not None and history_filter_id in set(items_df["id"].tolist()):
+        row = items_df[items_df["id"] == history_filter_id].iloc[0]
+        default_item_label = f"{row['name']} ({row['barcode']})"
+    selected_item_label = st.selectbox("Item", item_option_labels, index=item_option_labels.index(default_item_label))
+    st.session_state["history_item_filter"] = None
 
 with col3:
-    selected_type = st.selectbox("Transaction type", ["All", "in", "out"])
+    selected_type = st.selectbox("Transaction type", ["All", "Receive", "Check Out"])
 
 start_date = None
 end_date = None
@@ -39,7 +44,8 @@ if selected_item_label != "All items":
     ].iloc[0]
     item_id = int(selected_row["id"])
 
-tx_type = None if selected_type == "All" else selected_type
+tx_type_map = {"Receive": "in", "Check Out": "out"}
+tx_type = None if selected_type == "All" else tx_type_map[selected_type]
 
 history_df = get_transactions(start_date=start_date, end_date=end_date, item_id=item_id, tx_type=tx_type)
 
@@ -47,6 +53,7 @@ if history_df.empty:
     st.info("No transactions found for selected filters.")
 else:
     history_df["timestamp"] = pd.to_datetime(history_df["timestamp"])
+    history_df["type"] = history_df["type"].map({"in": "📥 Receive", "out": "📤 Check Out"})
     history_df = history_df.rename(
         columns={
             "id": "Transaction ID",
@@ -59,4 +66,4 @@ else:
             "notes": "Notes",
         }
     )
-    st.dataframe(history_df, use_container_width=True)
+    st.dataframe(history_df, use_container_width=True, hide_index=True)

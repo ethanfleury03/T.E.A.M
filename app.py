@@ -1,28 +1,22 @@
 import streamlit as st
 
-from database import get_dashboard_totals, init_db
+from database import init_db
+from ui.components import render_sidebar
+from ui.styles import configure_page, inject_global_styles
 
 
-st.set_page_config(page_title="Food Pantry Dashboard", page_icon=":shopping_trolley:", layout="wide")
+configure_page(page_title="Niagara Pantry", page_icon=":shopping_trolley:")
+inject_global_styles()
 init_db()
 
-st.title("Food Pantry Dashboard")
-st.caption("Track inventory, item checkouts, and incoming donations/restocks.")
+home = st.Page("pages/home.py", title="Home", icon=":material/home:", default=True)
+inventory = st.Page("pages/inventory.py", title="Inventory", icon=":material/inventory_2:")
+scanner = st.Page("pages/scanner.py", title="Scanner", icon=":material/qr_code_scanner:")
+item_entry = st.Page("pages/item_entry.py", title="Item Entry", icon=":material/post_add:")
+analytics = st.Page("pages/analytics.py", title="Analytics", icon=":material/monitoring:")
+history = st.Page("pages/history.py", title="History", icon=":material/history:")
 
-totals = get_dashboard_totals()
-col1, col2, col3 = st.columns(3)
-col1.metric("Unique Items", int(totals["unique_items"]))
-col2.metric("Current Units In Stock", int(totals["total_quantity"]))
-col3.metric("Total Transactions", int(totals["total_transactions"]))
-
-st.markdown(
-    """
-Use the pages in the sidebar:
-
-- **Inventory**: view current stock and add new pantry items
-- **Check Out**: scan barcode and log items going out
-- **Receive Items**: scan barcode and log items coming in
-- **Analytics**: view stock trends and most checked-out items
-- **History**: review full transaction log
-"""
-)
+nav = st.navigation([home, inventory, scanner, item_entry, analytics, history])
+active_title = getattr(nav, "title", "Home")
+render_sidebar(active_title)
+nav.run()
