@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from database import get_item_lookup, get_transactions
+from date_utils import streamlit_date_range_to_iso
 from ui.components import render_page_header
 
 
@@ -22,20 +23,20 @@ with col2:
     item_option_labels = ["All items"] + [f"{row['name']} ({row['barcode']})" for _, row in items_df.iterrows()]
     default_item_label = "All items"
     history_filter_id = st.session_state.get("history_item_filter")
-    if history_filter_id is not None and history_filter_id in set(items_df["id"].tolist()):
+    if history_filter_id is not None and not items_df.empty and history_filter_id in set(items_df["id"].tolist()):
         row = items_df[items_df["id"] == history_filter_id].iloc[0]
         default_item_label = f"{row['name']} ({row['barcode']})"
-    selected_item_label = st.selectbox("Item", item_option_labels, index=item_option_labels.index(default_item_label))
+    try:
+        item_index = item_option_labels.index(default_item_label)
+    except ValueError:
+        item_index = 0
+    selected_item_label = st.selectbox("Item", item_option_labels, index=item_index)
     st.session_state["history_item_filter"] = None
 
 with col3:
     selected_type = st.selectbox("Transaction type", ["All", "Receive", "Check Out"])
 
-start_date = None
-end_date = None
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    start_date = date_range[0].isoformat()
-    end_date = date_range[1].isoformat()
+start_date, end_date = streamlit_date_range_to_iso(date_range)
 
 item_id = None
 if selected_item_label != "All items":

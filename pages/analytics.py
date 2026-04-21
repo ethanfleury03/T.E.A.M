@@ -5,6 +5,7 @@ import plotly.express as px
 import streamlit as st
 
 from database import SETTINGS, get_item_lookup, get_stock_over_time, get_top_checked_out_items, get_transactions
+from date_utils import streamlit_date_range_to_iso
 from ui.components import render_kpi_cards, render_page_header
 
 
@@ -15,18 +16,18 @@ default_end = date.today()
 default_start = default_end - timedelta(days=30)
 date_range = st.date_input("Date range for top checked-out chart", value=(default_start, default_end))
 
-start_date = None
-end_date = None
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    start_date = date_range[0].isoformat()
-    end_date = date_range[1].isoformat()
+start_date, end_date = streamlit_date_range_to_iso(date_range)
 
 top_df = get_top_checked_out_items(limit=10, start_date=start_date, end_date=end_date)
 items_df = get_item_lookup()
 tx_df = get_transactions(start_date=start_date, end_date=end_date)
 checkout_count = int(tx_df[tx_df["type"] == "out"]["quantity"].sum()) if not tx_df.empty else 0
 receive_count = int(tx_df[tx_df["type"] == "in"]["quantity"].sum()) if not tx_df.empty else 0
-low_now = int((items_df["quantity"] <= threshold).sum()) if not items_df.empty else 0
+if items_df.empty:
+    low_now = 0
+else:
+    q = items_df["quantity"].astype(int)
+    low_now = int(((q > 0) & (q <= threshold)).sum())
 
 render_kpi_cards(
     [
