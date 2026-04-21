@@ -10,7 +10,10 @@ from database import SETTINGS
 def render_sidebar(active_page: str) -> int:
     with st.sidebar:
         st.markdown('<div class="brand-title">Niagara Pantry</div>', unsafe_allow_html=True)
-        st.markdown('<div class="brand-subtitle">Food Inventory Dashboard</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="brand-subtitle">Track what leaves the pantry — restocking is secondary</div>',
+            unsafe_allow_html=True,
+        )
 
         st.divider()
         st.caption("Utilities")
@@ -34,7 +37,9 @@ def render_page_header(title: str, subtitle: str, actions: Iterable[dict] | None
     actions = list(actions or [])
     result: dict[str, bool] = {}
 
-    left_col, right_col = st.columns([3, 2], vertical_alignment="center")
+    # Extra width on the right when there are several header buttons (avoids label wrap/clipping).
+    col_ratio = (2, 3.2) if len(actions) >= 4 else (3, 2)
+    left_col, right_col = st.columns(list(col_ratio), vertical_alignment="top")
     with left_col:
         st.markdown(
             f"""
@@ -47,6 +52,10 @@ def render_page_header(title: str, subtitle: str, actions: Iterable[dict] | None
         )
     with right_col:
         if actions:
+            st.markdown(
+                '<div class="page-header-actions-offset" aria-hidden="true"></div>',
+                unsafe_allow_html=True,
+            )
             action_cols = st.columns(len(actions))
             for col, action in zip(action_cols, actions):
                 with col:

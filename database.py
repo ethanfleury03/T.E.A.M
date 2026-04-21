@@ -253,22 +253,33 @@ def get_top_checked_out_items(limit: int = 10, start_date: str | None = None, en
     return df
 
 
-def get_stock_over_time(item_id: int) -> pd.DataFrame:
+def get_checked_out_by_category(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    """Total units checked out (scanned out), grouped by item category."""
+    query = """
+        SELECT
+            i.category AS category,
+            SUM(t.quantity) AS total_checked_out
+        FROM transactions t
+        JOIN items i ON i.id = t.item_id
+        WHERE t.type = 'out'
+    """
+    params: list[Any] = []
+
+    if start_date:
+        query += " AND DATE(t.timestamp) >= DATE(?)"
+        params.append(start_date)
+    if end_date:
+        query += " AND DATE(t.timestamp) <= DATE(?)"
+        params.append(end_date)
+
+    query += """
+        GROUP BY i.category
+        ORDER BY total_checked_out DESC
+    """
+
     with get_connection() as conn:
-        tx_df = pd.read_sql_query(
-            """
-            SELECT timestamp, type, quantity
-            FROM transactions
-            WHERE item_id = ?
-            ORDER BY timestamp ASC
-            """,
-            conn,
-            params=[item_id],
-        )
-
-    if tx_df.empty:
-        return pd.DataFrame(columns=["timestamp", "stock_level"])
-
-    tx_df["delta"] = tx_df.apply(lambda row: row["quantity"] if row["type"] == "in" else -row["quantity"], axis=1)
-    tx_df["stock_level"] = tx_df["delta"].cumsum()
-    return tx_df[["timestamp", "stock_level"]]
+        df = pd.read_sql_query(query, conn, params=params)
+    return df

@@ -6,7 +6,7 @@ from ui.components import render_kpi_cards, render_page_header
 
 render_page_header(
     "Food Pantry Dashboard",
-    "Track inventory, monitor low stock, and capture every incoming/outgoing item.",
+    "Focused on items going out: volunteers scan when food is taken. Restocking uses Inventory or Stocking.",
 )
 
 totals = get_dashboard_totals()
@@ -23,19 +23,19 @@ render_kpi_cards(
             "label": "Total Transactions",
             "value": int(totals["total_transactions"]),
             "icon": "🧾",
-            "help": "All check-in and check-out logs",
+            "help": "All movement logs (mostly check-outs from scanning)",
         },
     ]
 )
 
 st.markdown(
     """
-### Workspace
+### Workspace (take items first)
 
-- **Inventory**: view stock, filter quickly, and manage items
-- **Scanner**: scan barcodes to check food in or out
-- **Item Entry**: scan and register new items into the database
-- **Analytics**: trend usage and stock movement over time
-- **History**: audit all inventory transactions
+- **Take items**: scan barcodes — each scan removes **1** unit (main volunteer workflow)
+- **Inventory**: see what’s low, **check out** quantities, or restock when needed
+- **Analytics**: what’s moving **out** by item and category
+- **History**: audit trail (defaults to **check-outs**)
+- **Stocking**: add new SKUs or rare restock context — not the day-to-day path
 """
 )

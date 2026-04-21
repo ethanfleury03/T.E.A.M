@@ -15,23 +15,15 @@ for key in ("show_add_item_form", "inventory_action_mode"):
 
 header_actions = render_page_header(
     "Inventory",
-    "View stock, track low inventory, and manage pantry items.",
+    "See levels and **check items out** (or restock). Use **Take items** in the nav to scan barcodes; low-stock cutoff is in the sidebar.",
     actions=[
-        {"label": "Add Item", "key": "inventory_add", "type": "primary"},
-        {"label": "Scan Barcode", "key": "inventory_scan"},
         {"label": "Import CSV", "key": "inventory_import"},
-        {"label": "Adjust Threshold", "key": "inventory_threshold"},
     ],
 )
 
-if header_actions.get("inventory_add"):
-    st.session_state["show_add_item_form"] = not st.session_state["show_add_item_form"]
-if header_actions.get("inventory_scan"):
-    st.info("Use the Scanner page for barcode workflows.")
 if header_actions.get("inventory_import"):
     st.info("CSV import is not configured yet in this app.")
-if header_actions.get("inventory_threshold"):
-    st.info("Use the sidebar utility slider to adjust low-stock warnings.")
+
 
 
 @st.cache_data(ttl=20)
@@ -100,169 +92,131 @@ else:
     else:
         filtered_df = filtered_df.sort_values("quantity", ascending=False)
 
-    main_col, alert_col = st.columns([3, 1], vertical_alignment="top")
-    with main_col:
-        table_df = filtered_df[["name", "barcode", "category", "unit", "quantity", "Status"]].copy()
-        table_df.columns = ["Item", "Barcode", "Category", "Unit", "Quantity", "Status"]
-        table_df["Status"] = table_df["Status"].map({"OK": "✅ OK", "Low": "⚠ Low", "Out": "🛑 Out"})
+    table_df = filtered_df[["name", "barcode", "category", "unit", "quantity", "Status"]].copy()
+    table_df.columns = ["Item", "Barcode", "Category", "Unit", "Quantity", "Status"]
+    table_df["Status"] = table_df["Status"].map({"OK": "✅ OK", "Low": "⚠ Low", "Out": "🛑 Out"})
 
-        def row_style(row: pd.Series) -> list[str]:
-            if "Out" in str(row["Status"]):
-                return ["background-color: rgba(227, 93, 91, 0.10);"] * len(row)
-            if "Low" in str(row["Status"]):
-                return ["background-color: rgba(245, 166, 35, 0.10);"] * len(row)
-            return [""] * len(row)
+    def row_style(row: pd.Series) -> list[str]:
+        if "Out" in str(row["Status"]):
+            return ["background-color: rgba(227, 93, 91, 0.10);"] * len(row)
+        if "Low" in str(row["Status"]):
+            return ["background-color: rgba(245, 166, 35, 0.10);"] * len(row)
+        return [""] * len(row)
 
-        styled = (
-            table_df.style.apply(row_style, axis=1)
-            .format({"Quantity": "{:.0f}"})
-            .set_properties(subset=["Quantity"], **{"text-align": "right", "font-weight": "600"})
-        )
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+    styled = (
+        table_df.style.apply(row_style, axis=1)
+        .format({"Quantity": "{:.0f}"})
+        .set_properties(subset=["Quantity"], **{"text-align": "right", "font-weight": "600"})
+    )
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
-        if not filtered_df.empty:
-            st.markdown("#### Quick Actions")
-            options = {
-                f"{row['name']} ({row['barcode']}) - {row['quantity']} {row['unit']}": int(row["id"])
-                for _, row in filtered_df.iterrows()
-            }
-            selected_label = st.selectbox("Select item", list(options.keys()))
-            selected_id = options[selected_label]
-            selected_item = filtered_df[filtered_df["id"] == selected_id].iloc[0]
+    if not filtered_df.empty:
+        st.markdown("#### Quick Actions")
+        options = {
+            f"{row['name']} ({row['barcode']}) - {row['quantity']} {row['unit']}": int(row["id"])
+            for _, row in filtered_df.iterrows()
+        }
+        selected_label = st.selectbox("Select item", list(options.keys()))
+        selected_id = options[selected_label]
+        selected_item = filtered_df[filtered_df["id"] == selected_id].iloc[0]
 
-            a1, a2, a3, a4, a5 = st.columns(5)
-            with a1:
-                if st.button("Receive", use_container_width=True, key="inventory_q_receive"):
-                    st.session_state["inventory_action_mode"] = "receive"
-            with a2:
-                if st.button("Check Out", use_container_width=True, key="inventory_q_checkout"):
-                    st.session_state["inventory_action_mode"] = "checkout"
-            with a3:
-                if st.button("Edit Item", use_container_width=True, key="inventory_q_edit"):
-                    st.session_state["inventory_action_mode"] = "edit"
-            with a4:
-                if st.button("View History", use_container_width=True, key="inventory_q_history"):
-                    st.session_state["history_item_filter"] = selected_id
-                    st.toast("History filter pre-set. Open the History page to view this item.", icon="🧾")
-            with a5:
-                if st.button("Delete", use_container_width=True, key="inventory_q_delete"):
-                    st.session_state["inventory_action_mode"] = "delete"
+        a1, a2, a3, a4, a5 = st.columns(5)
+        with a1:
+            if st.button("Check Out", use_container_width=True, type="primary", key="inventory_q_checkout"):
+                st.session_state["inventory_action_mode"] = "checkout"
+        with a2:
+            if st.button("Restock", use_container_width=True, key="inventory_q_receive"):
+                st.session_state["inventory_action_mode"] = "receive"
+        with a3:
+            if st.button("Edit Item", use_container_width=True, key="inventory_q_edit"):
+                st.session_state["inventory_action_mode"] = "edit"
+        with a4:
+            if st.button("View History", use_container_width=True, key="inventory_q_history"):
+                st.session_state["history_item_filter"] = selected_id
+                st.toast("History filter pre-set. Open the History page to view this item.", icon="🧾")
+        with a5:
+            if st.button("Delete", use_container_width=True, key="inventory_q_delete"):
+                st.session_state["inventory_action_mode"] = "delete"
 
-            if st.session_state["inventory_action_mode"] in {"receive", "checkout"}:
-                mode = st.session_state["inventory_action_mode"]
-                with st.form(f"inventory_{mode}_form", clear_on_submit=True):
-                    qty_label = "Quantity to receive" if mode == "receive" else "Quantity to check out"
-                    qty = st.number_input(qty_label, min_value=1, step=1)
-                    notes = st.text_input("Notes (optional)")
-                    submit_label = "Confirm Receive" if mode == "receive" else "Confirm Check Out"
-                    submitted = st.form_submit_button(submit_label)
-                    if submitted:
+        if st.session_state["inventory_action_mode"] in {"receive", "checkout"}:
+            mode = st.session_state["inventory_action_mode"]
+            with st.form(f"inventory_{mode}_form", clear_on_submit=True):
+                qty_label = "Quantity to restock" if mode == "receive" else "Quantity to check out"
+                qty = st.number_input(qty_label, min_value=1, step=1)
+                notes = st.text_input("Notes (optional)")
+                submit_label = "Confirm restock" if mode == "receive" else "Confirm check out"
+                submitted = st.form_submit_button(submit_label)
+                if submitted:
+                    try:
+                        record_transaction(
+                            item_id=int(selected_item["id"]),
+                            tx_type="in" if mode == "receive" else "out",
+                            quantity=int(qty),
+                            notes=notes,
+                        )
+                        st.cache_data.clear()
+                        st.toast("Inventory updated successfully.", icon="✅")
+                        st.session_state["inventory_action_mode"] = "none"
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+
+        if st.session_state["inventory_action_mode"] == "edit":
+            with st.form("inventory_edit_item_form"):
+                new_name = st.text_input("Item name", value=str(selected_item["name"]))
+                new_barcode = st.text_input("Barcode", value=str(selected_item["barcode"]))
+                current_cat = str(selected_item.get("category", "Uncategorized"))
+                cat_options = ITEM_CATEGORIES if current_cat in ITEM_CATEGORIES else [current_cat] + ITEM_CATEGORIES
+                new_category = st.selectbox("Category", cat_options, index=cat_options.index(current_cat))
+                new_unit = st.text_input("Unit", value=str(selected_item["unit"]))
+                submitted = st.form_submit_button("Save Item Details")
+                if submitted:
+                    if not new_name.strip() or not new_barcode.strip():
+                        st.error("Item name and barcode are required.")
+                    else:
                         try:
-                            record_transaction(
+                            update_item(
                                 item_id=int(selected_item["id"]),
-                                tx_type="in" if mode == "receive" else "out",
-                                quantity=int(qty),
-                                notes=notes,
+                                name=new_name,
+                                barcode=new_barcode,
+                                unit=new_unit,
+                                category=new_category,
                             )
                             st.cache_data.clear()
-                            st.toast("Inventory updated successfully.", icon="✅")
+                            st.toast("Item details updated.", icon="✏️")
+                            st.session_state["inventory_action_mode"] = "none"
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.error("That barcode is already in use.")
+
+        if st.session_state["inventory_action_mode"] == "delete":
+            st.warning(
+                f"Delete **{selected_item['name']}**? This permanently removes the item and its transaction history."
+            )
+            with st.form("inventory_delete_item_form"):
+                confirm_delete = st.checkbox("Yes, permanently delete this item")
+                d1, d2 = st.columns(2)
+                with d1:
+                    delete_submitted = st.form_submit_button("Delete Item", type="primary")
+                with d2:
+                    cancel_submitted = st.form_submit_button("Cancel")
+
+                if cancel_submitted:
+                    st.session_state["inventory_action_mode"] = "none"
+                    st.rerun()
+
+                if delete_submitted:
+                    if not confirm_delete:
+                        st.error("Please confirm deletion before continuing.")
+                    else:
+                        try:
+                            delete_item(int(selected_item["id"]))
+                            st.cache_data.clear()
+                            st.toast("Item deleted.", icon="🗑️")
                             st.session_state["inventory_action_mode"] = "none"
                             st.rerun()
                         except ValueError as exc:
                             st.error(str(exc))
-
-            if st.session_state["inventory_action_mode"] == "edit":
-                with st.form("inventory_edit_item_form"):
-                    new_name = st.text_input("Item name", value=str(selected_item["name"]))
-                    new_barcode = st.text_input("Barcode", value=str(selected_item["barcode"]))
-                    current_cat = str(selected_item.get("category", "Uncategorized"))
-                    cat_options = ITEM_CATEGORIES if current_cat in ITEM_CATEGORIES else [current_cat] + ITEM_CATEGORIES
-                    new_category = st.selectbox("Category", cat_options, index=cat_options.index(current_cat))
-                    new_unit = st.text_input("Unit", value=str(selected_item["unit"]))
-                    submitted = st.form_submit_button("Save Item Details")
-                    if submitted:
-                        if not new_name.strip() or not new_barcode.strip():
-                            st.error("Item name and barcode are required.")
-                        else:
-                            try:
-                                update_item(
-                                    item_id=int(selected_item["id"]),
-                                    name=new_name,
-                                    barcode=new_barcode,
-                                    unit=new_unit,
-                                    category=new_category,
-                                )
-                                st.cache_data.clear()
-                                st.toast("Item details updated.", icon="✏️")
-                                st.session_state["inventory_action_mode"] = "none"
-                                st.rerun()
-                            except sqlite3.IntegrityError:
-                                st.error("That barcode is already in use.")
-
-            if st.session_state["inventory_action_mode"] == "delete":
-                st.warning(
-                    f"Delete **{selected_item['name']}**? This permanently removes the item and its transaction history."
-                )
-                with st.form("inventory_delete_item_form"):
-                    confirm_delete = st.checkbox("Yes, permanently delete this item")
-                    d1, d2 = st.columns(2)
-                    with d1:
-                        delete_submitted = st.form_submit_button("Delete Item", type="primary")
-                    with d2:
-                        cancel_submitted = st.form_submit_button("Cancel")
-
-                    if cancel_submitted:
-                        st.session_state["inventory_action_mode"] = "none"
-                        st.rerun()
-
-                    if delete_submitted:
-                        if not confirm_delete:
-                            st.error("Please confirm deletion before continuing.")
-                        else:
-                            try:
-                                delete_item(int(selected_item["id"]))
-                                st.cache_data.clear()
-                                st.toast("Item deleted.", icon="🗑️")
-                                st.session_state["inventory_action_mode"] = "none"
-                                st.rerun()
-                            except ValueError as exc:
-                                st.error(str(exc))
-
-    with alert_col:
-        st.markdown('<div class="panel"><div class="panel-title">Low Stock</div>', unsafe_allow_html=True)
-        low_df = items_df[items_df["Status"] == "Low"].sort_values("quantity", ascending=True).head(5)
-        if low_df.empty:
-            st.caption("No low-stock items right now.")
-        else:
-            for _, row in low_df.iterrows():
-                name = str(row["name"])
-                qty = int(row["quantity"])
-                item_id = int(row["id"])
-                st.write(f"{name} - {qty}")
-                if st.button("Receive +1", key=f"low_receive_{item_id}", use_container_width=True):
-                    record_transaction(item_id=item_id, tx_type="in", quantity=1, notes="Quick receive from low-stock panel")
-                    st.cache_data.clear()
-                    st.toast(f"Received 1 unit of {name}.", icon="📥")
-                    st.rerun()
-
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown("")
-        st.markdown('<div class="panel"><div class="panel-title">Out of Stock</div>', unsafe_allow_html=True)
-        out_df = items_df[items_df["Status"] == "Out"].sort_values("name").head(5)
-        if out_df.empty:
-            st.caption("No out-of-stock items.")
-        else:
-            for _, row in out_df.iterrows():
-                name = str(row["name"])
-                qty = int(row["quantity"])
-                item_id = int(row["id"])
-                st.write(f"{name} - {qty}")
-                if st.button("Receive +1", key=f"out_receive_{item_id}", use_container_width=True):
-                    record_transaction(item_id=item_id, tx_type="in", quantity=1, notes="Quick receive from out-of-stock panel")
-                    st.cache_data.clear()
-                    st.toast(f"Received 1 unit of {name}.", icon="📥")
-                    st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
 
 if st.session_state["show_add_item_form"]:
     with st.form("inventory_add_item_form", clear_on_submit=True):

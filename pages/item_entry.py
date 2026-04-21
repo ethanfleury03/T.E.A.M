@@ -6,8 +6,8 @@ from database import ITEM_CATEGORIES, add_item, get_item_by_barcode
 from ui.components import render_page_header
 
 render_page_header(
-    "Item Entry",
-    "Add new items to the database by scanning their barcode.",
+    "Stocking",
+    "Admin / setup: register **new** products. Day-to-day volunteers use **Take items** instead.",
 )
 
 st.markdown("")
@@ -32,7 +32,7 @@ if barcode.strip():
         st.warning(
             f"**\"{existing['name']}\"** is already in the database.  \n"
             "This page is only for adding **new** items. "
-            "Use **Scanner** to check inventory in or out."
+            "Use **Take items** to record food going out (or restock mode there / Inventory for bulk)."
         )
     else:
         st.success("New barcode detected — fill in the details below to add this item.")
@@ -55,7 +55,7 @@ if barcode.strip():
                             unit=unit,
                             category=category,
                             initial_quantity=0,
-                            notes="Added via Item Entry",
+                            notes="Added via Stocking",
                         )
                         st.cache_data.clear()
                         st.toast(f"Added \"{name.strip()}\" to the database.", icon="✅")
@@ -66,4 +66,4 @@ if barcode.strip():
                     except ValueError as exc:
                         st.error(str(exc))
 else:
-    st.info("Scan a barcode above to check if it's already in the system or to register a new item.")
+    st.info("Scan a barcode above to see if it’s new, then add catalog details. Restocking happens on **Inventory** or **Take items** (restock mode).")

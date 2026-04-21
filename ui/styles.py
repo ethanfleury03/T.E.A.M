@@ -9,10 +9,27 @@ def inject_global_styles() -> None:
     st.markdown(
         """
         <style>
+            /* Streamlit 1.4x: main content is [data-testid="stMainBlockContainer"] + .block-container.
+               Use high-specificity selectors so this wins over Emotion after reruns. */
+            section[data-testid="stMain"] [data-testid="stMainBlockContainer"] {
+                padding-top: 4.5rem !important;
+                padding-bottom: 2rem !important;
+            }
+            section[data-testid="stMain"] [data-testid="stMainBlockContainer"].block-container {
+                padding-top: 4.5rem !important;
+            }
             .block-container {
-                padding-top: 1.4rem;
-                padding-bottom: 2rem;
+                padding-top: 4.5rem !important;
+                padding-bottom: 2rem !important;
                 max-width: 1380px;
+            }
+
+            /* Aligns action buttons with the title line inside .page-header (same top padding). */
+            .page-header-actions-offset {
+                display: block;
+                height: 0;
+                padding-top: 0.9rem;
+                margin: 0;
             }
 
             .brand-title {

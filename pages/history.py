@@ -7,7 +7,10 @@ from database import get_item_lookup, get_transactions
 from ui.components import render_page_header
 
 
-render_page_header("Transaction History", "Audit all inventory actions across check-outs and receipts.")
+render_page_header(
+    "Transaction History",
+    "Defaults to **check-outs** (what left the pantry). Switch type to see restocking.",
+)
 
 items_df = get_item_lookup()
 
@@ -29,7 +32,13 @@ with col2:
     st.session_state["history_item_filter"] = None
 
 with col3:
-    selected_type = st.selectbox("Transaction type", ["All", "Receive", "Check Out"])
+    _tx_labels = ["All", "Restock", "Check Out"]
+    selected_type = st.selectbox(
+        "Transaction type",
+        _tx_labels,
+        index=2,
+        help="Volunteer workflow is mostly check-out; restocks show as Restock.",
+    )
 
 start_date = None
 end_date = None
@@ -44,7 +53,7 @@ if selected_item_label != "All items":
     ].iloc[0]
     item_id = int(selected_row["id"])
 
-tx_type_map = {"Receive": "in", "Check Out": "out"}
+tx_type_map = {"Restock": "in", "Check Out": "out"}
 tx_type = None if selected_type == "All" else tx_type_map[selected_type]
 
 history_df = get_transactions(start_date=start_date, end_date=end_date, item_id=item_id, tx_type=tx_type)
@@ -53,7 +62,7 @@ if history_df.empty:
     st.info("No transactions found for selected filters.")
 else:
     history_df["timestamp"] = pd.to_datetime(history_df["timestamp"])
-    history_df["type"] = history_df["type"].map({"in": "📥 Receive", "out": "📤 Check Out"})
+    history_df["type"] = history_df["type"].map({"in": "📥 Restock", "out": "📤 Check Out"})
     history_df = history_df.rename(
         columns={
             "id": "Transaction ID",
