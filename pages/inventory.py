@@ -3,15 +3,24 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
-from database import ITEM_CATEGORIES, SETTINGS, add_item, delete_item, get_all_items, record_transaction, update_item
+from database import (
+    ITEM_CATEGORIES,
+    SETTINGS,
+    add_item,
+    delete_item,
+    get_all_items,
+    import_items_from_csv,
+    record_transaction,
+    update_item,
+)
 from ui.components import render_empty_state, render_kpi_cards, render_page_header
 
 
 low_stock_threshold = int(st.session_state.get("low_stock_threshold", SETTINGS["LOW_STOCK_THRESHOLD"]))
 
-for key in ("show_add_item_form", "inventory_action_mode"):
+for key in ("show_add_item_form", "inventory_action_mode", "inventory_show_import"):
     if key not in st.session_state:
-        st.session_state[key] = False if key == "show_add_item_form" else "none"
+        st.session_state[key] = False if key != "inventory_action_mode" else "none"
 
 header_actions = render_page_header(
     "Inventory",
@@ -22,8 +31,40 @@ header_actions = render_page_header(
 )
 
 if header_actions.get("inventory_import"):
-    st.info("CSV import is not configured yet in this app.")
+    st.session_state["inventory_show_import"] = True
 
+if st.session_state.get("inventory_show_import"):
+    with st.expander("Import inventory from CSV", expanded=True):
+        st.caption(
+            "Required columns: **name**, **barcode**. Optional: **category**, **unit**, **initial_quantity** (default 0)."
+        )
+        uploaded = st.file_uploader("CSV file", type=["csv"], key="inventory_csv_uploader")
+        ic1, ic2 = st.columns(2)
+        with ic1:
+            run_import = st.button("Run import", type="primary", key="inventory_csv_run")
+        with ic2:
+            if st.button("Close", key="inventory_csv_close"):
+                st.session_state["inventory_show_import"] = False
+                st.rerun()
+        if run_import:
+            if uploaded is None:
+                st.error("Choose a CSV file before running import.")
+            else:
+                summary = import_items_from_csv(uploaded)
+                st.cache_data.clear()
+                if summary["errors"]:
+                    st.warning("Some rows had problems:")
+                    for err in summary["errors"][:20]:
+                        st.caption(err)
+                    if len(summary["errors"]) > 20:
+                        st.caption(f"... and {len(summary['errors']) - 20} more.")
+                st.success(
+                    f"Added **{summary['added']}** item(s). "
+                    f"Skipped **{summary['skipped_duplicates']}** (barcode already in database)."
+                )
+                if summary["added"] > 0:
+                    st.session_state["inventory_show_import"] = False
+                    st.rerun()
 
 
 @st.cache_data(ttl=20)
@@ -50,7 +91,7 @@ if items_df.empty:
     if add_clicked:
         st.session_state["show_add_item_form"] = True
     if import_clicked:
-        st.info("CSV import is not configured yet in this app.")
+        st.session_state["inventory_show_import"] = True
 else:
     items_df["Status"] = items_df["quantity"].apply(lambda value: get_status(int(value), low_stock_threshold))
     total_skus = int(items_df["id"].nunique())

@@ -1,3 +1,4 @@
 streamlit
 pandas
 plotly
+pytest>=7.0

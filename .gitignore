@@ -1,4 +1,7 @@
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.db
 service_account.json
-pantry.db

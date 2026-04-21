@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +102,7 @@ def add_item(name: str, barcode: str, unit: str, category: str = "Uncategorized"
                 INSERT INTO transactions (item_id, type, quantity, timestamp, notes)
                 VALUES (?, 'in', ?, ?, ?)
                 """,
-                (item_id, initial_quantity, datetime.utcnow().isoformat(), notes or "Initial stock"),
+                (item_id, initial_quantity, datetime.now(timezone.utc).isoformat(), notes or "Initial stock"),
             )
     return item_id
 
@@ -177,7 +177,7 @@ def record_transaction(item_id: int, tx_type: str, quantity: int, notes: str = "
             INSERT INTO transactions (item_id, type, quantity, timestamp, notes)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (item_id, tx_type, quantity, datetime.utcnow().isoformat(), notes.strip()),
+            (item_id, tx_type, quantity, datetime.now(timezone.utc).isoformat(), notes.strip()),
         )
 
 
@@ -283,3 +283,93 @@ def get_checked_out_by_category(
     with get_connection() as conn:
         df = pd.read_sql_query(query, conn, params=params)
     return df
+
+
+def get_stock_over_time(item_id: int) -> pd.DataFrame:
+    with get_connection() as conn:
+        tx_df = pd.read_sql_query(
+            """
+            SELECT timestamp, type, quantity
+            FROM transactions
+            WHERE item_id = ?
+            ORDER BY timestamp ASC
+            """,
+            conn,
+            params=[item_id],
+        )
+
+    if tx_df.empty:
+        return pd.DataFrame(columns=["timestamp", "stock_level"])
+
+    tx_df["delta"] = tx_df.apply(lambda row: row["quantity"] if row["type"] == "in" else -row["quantity"], axis=1)
+    tx_df["stock_level"] = tx_df["delta"].cumsum()
+    return tx_df[["timestamp", "stock_level"]]
+
+
+def import_items_from_csv(file_obj: Any) -> dict[str, Any]:
+    """
+    Import rows from a CSV with columns: name, barcode (required);
+    optional: category, unit, initial_quantity (default 0).
+    Barcodes already in the database are skipped (counted as skipped_duplicates).
+    """
+    df = pd.read_csv(file_obj)
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    required = {"name", "barcode"}
+    if not required.issubset(set(df.columns)):
+        missing = required - set(df.columns)
+        return {"added": 0, "skipped_duplicates": 0, "errors": [f"Missing required columns: {sorted(missing)}"]}
+
+    added = 0
+    skipped_duplicates = 0
+    errors: list[str] = []
+    seen_in_file: set[str] = set()
+
+    for row_num, (_, row) in enumerate(df.iterrows(), start=1):
+        line_no = row_num + 1
+        raw_barcode = row.get("barcode")
+        raw_name = row.get("name")
+        if pd.isna(raw_barcode) or pd.isna(raw_name):
+            errors.append(f"Row {line_no}: name and barcode are required.")
+            continue
+        barcode = str(raw_barcode).strip()
+        name = str(raw_name).strip()
+        if not barcode or not name:
+            errors.append(f"Row {line_no}: name and barcode cannot be empty.")
+            continue
+        if barcode in seen_in_file:
+            errors.append(f"Row {line_no}: duplicate barcode in file ({barcode}).")
+            continue
+        seen_in_file.add(barcode)
+
+        if get_item_by_barcode(barcode) is not None:
+            skipped_duplicates += 1
+            continue
+
+        cat_raw = row.get("category", "Uncategorized")
+        category = "Uncategorized" if pd.isna(cat_raw) else str(cat_raw).strip() or "Uncategorized"
+        unit_raw = row.get("unit", "units")
+        unit = "units" if pd.isna(unit_raw) else str(unit_raw).strip() or "units"
+        iq_raw = row.get("initial_quantity", 0)
+        try:
+            initial_quantity = int(iq_raw) if not pd.isna(iq_raw) else 0
+        except (TypeError, ValueError):
+            errors.append(f"Row {line_no}: initial_quantity must be an integer.")
+            continue
+        if initial_quantity < 0:
+            errors.append(f"Row {line_no}: initial_quantity cannot be negative.")
+            continue
+
+        try:
+            add_item(
+                name=name,
+                barcode=barcode,
+                unit=unit,
+                category=category,
+                initial_quantity=initial_quantity,
+                notes="CSV import",
+            )
+            added += 1
+        except ValueError as exc:
+            errors.append(f"Row {line_no}: {exc}")
+
+    return {"added": added, "skipped_duplicates": skipped_duplicates, "errors": errors}
