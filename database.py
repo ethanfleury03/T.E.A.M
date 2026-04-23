@@ -32,6 +32,23 @@ def get_connection() -> sqlite3.Connection:
 _db_initialized = False
 
 
+def normalize_barcode(raw: str) -> str:
+    """Trim scanner whitespace/control chars while preserving the stored code value."""
+    return "".join(ch for ch in str(raw).strip() if ch not in "\r\n\t")
+
+
+def _require_text(value: str, field_name: str) -> str:
+    cleaned = str(value).strip()
+    if not cleaned:
+        raise ValueError(f"{field_name} is required.")
+    return cleaned
+
+
+def _clean_optional_text(value: str, default: str) -> str:
+    cleaned = str(value).strip()
+    return cleaned or default
+
+
 def init_db() -> None:
     global _db_initialized
     if _db_initialized:
@@ -82,9 +99,55 @@ def get_dashboard_totals() -> dict[str, int]:
     }
 
 
+def get_outbound_dashboard_totals() -> dict[str, Any]:
+    with get_connection() as conn:
+        known_items = conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+        total_scanned_out = conn.execute(
+            "SELECT COALESCE(SUM(quantity), 0) FROM transactions WHERE type = 'out'"
+        ).fetchone()[0]
+        unique_items_scanned = conn.execute(
+            "SELECT COUNT(DISTINCT item_id) FROM transactions WHERE type = 'out'"
+        ).fetchone()[0]
+        items_not_scanned = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM items
+            WHERE id NOT IN (SELECT DISTINCT item_id FROM transactions WHERE type = 'out')
+            """
+        ).fetchone()[0]
+        top_row = conn.execute(
+            """
+            SELECT i.name, SUM(t.quantity) AS total_scanned_out
+            FROM transactions t
+            JOIN items i ON i.id = t.item_id
+            WHERE t.type = 'out'
+            GROUP BY i.id, i.name
+            ORDER BY total_scanned_out DESC, i.name COLLATE NOCASE
+            LIMIT 1
+            """
+        ).fetchone()
+
+    return {
+        "known_items": int(known_items),
+        "total_scanned_out": int(total_scanned_out),
+        "unique_items_scanned": int(unique_items_scanned),
+        "items_not_scanned": int(items_not_scanned),
+        "top_item": str(top_row["name"]) if top_row else "None yet",
+        "top_item_count": int(top_row["total_scanned_out"]) if top_row else 0,
+    }
+
+
 def add_item(name: str, barcode: str, unit: str, category: str = "Uncategorized", initial_quantity: int = 0, notes: str = "") -> int:
     if initial_quantity < 0:
         raise ValueError("Initial quantity must be 0 or greater.")
+
+    cleaned_name = _require_text(name, "Item name")
+    cleaned_barcode = normalize_barcode(barcode)
+    if not cleaned_barcode:
+        raise ValueError("Barcode is required.")
+    cleaned_category = _clean_optional_text(category, "Uncategorized")
+    cleaned_unit = _clean_optional_text(unit, "units")
+    cleaned_notes = str(notes).strip()
 
     with get_connection() as conn:
         cursor = conn.execute(
@@ -92,7 +155,7 @@ def add_item(name: str, barcode: str, unit: str, category: str = "Uncategorized"
             INSERT INTO items (barcode, name, category, unit, quantity)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (barcode.strip(), name.strip(), category.strip() or "Uncategorized", unit.strip() or "units", initial_quantity),
+            (cleaned_barcode, cleaned_name, cleaned_category, cleaned_unit, initial_quantity),
         )
         item_id = int(cursor.lastrowid)
 
@@ -102,7 +165,7 @@ def add_item(name: str, barcode: str, unit: str, category: str = "Uncategorized"
                 INSERT INTO transactions (item_id, type, quantity, timestamp, notes)
                 VALUES (?, 'in', ?, ?, ?)
                 """,
-                (item_id, initial_quantity, datetime.now(timezone.utc).isoformat(), notes or "Initial stock"),
+                (item_id, initial_quantity, datetime.now(timezone.utc).isoformat(), cleaned_notes or "Initial stock"),
             )
     return item_id
 
@@ -117,10 +180,13 @@ def get_all_items() -> pd.DataFrame:
 
 
 def get_item_by_barcode(barcode: str) -> dict[str, Any] | None:
+    cleaned_barcode = normalize_barcode(barcode)
+    if not cleaned_barcode:
+        return None
     with get_connection() as conn:
         row = conn.execute(
             "SELECT id, barcode, name, category, unit, quantity FROM items WHERE barcode = ?",
-            (barcode.strip(),),
+            (cleaned_barcode,),
         ).fetchone()
     return dict(row) if row else None
 
@@ -135,6 +201,13 @@ def get_item_lookup() -> pd.DataFrame:
 
 
 def update_item(item_id: int, name: str, barcode: str, unit: str, category: str = "Uncategorized") -> None:
+    cleaned_name = _require_text(name, "Item name")
+    cleaned_barcode = normalize_barcode(barcode)
+    if not cleaned_barcode:
+        raise ValueError("Barcode is required.")
+    cleaned_unit = _clean_optional_text(unit, "units")
+    cleaned_category = _clean_optional_text(category, "Uncategorized")
+
     with get_connection() as conn:
         conn.execute(
             """
@@ -142,7 +215,7 @@ def update_item(item_id: int, name: str, barcode: str, unit: str, category: str 
             SET name = ?, barcode = ?, unit = ?, category = ?
             WHERE id = ?
             """,
-            (name.strip(), barcode.strip(), unit.strip() or "units", category.strip() or "Uncategorized", item_id),
+            (cleaned_name, cleaned_barcode, cleaned_unit, cleaned_category, item_id),
         )
 
 
@@ -178,6 +251,24 @@ def record_transaction(item_id: int, tx_type: str, quantity: int, notes: str = "
             VALUES (?, ?, ?, ?, ?)
             """,
             (item_id, tx_type, quantity, datetime.now(timezone.utc).isoformat(), notes.strip()),
+        )
+
+
+def record_scan_out(item_id: int, quantity: int = 1, notes: str = "") -> None:
+    if quantity <= 0:
+        raise ValueError("Quantity must be greater than 0.")
+
+    with get_connection() as conn:
+        row = conn.execute("SELECT id FROM items WHERE id = ?", (item_id,)).fetchone()
+        if row is None:
+            raise ValueError("Item not found.")
+
+        conn.execute(
+            """
+            INSERT INTO transactions (item_id, type, quantity, timestamp, notes)
+            VALUES (?, 'out', ?, ?, ?)
+            """,
+            (item_id, quantity, datetime.now(timezone.utc).isoformat(), notes.strip()),
         )
 
 
@@ -220,6 +311,28 @@ def get_transactions(
 
     with get_connection() as conn:
         df = pd.read_sql_query(query, conn, params=params)
+    return df
+
+
+def get_item_sheet_summary() -> pd.DataFrame:
+    with get_connection() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT
+                i.id,
+                i.name,
+                i.barcode,
+                i.category,
+                i.unit,
+                COALESCE(SUM(t.quantity), 0) AS total_scanned_out,
+                MAX(t.timestamp) AS last_scanned_out
+            FROM items i
+            LEFT JOIN transactions t ON t.item_id = i.id AND t.type = 'out'
+            GROUP BY i.id, i.name, i.barcode, i.category, i.unit
+            ORDER BY total_scanned_out DESC, i.name COLLATE NOCASE
+            """,
+            conn,
+        )
     return df
 
 
@@ -285,6 +398,116 @@ def get_checked_out_by_category(
     return df
 
 
+def get_low_stock_items(threshold: int) -> pd.DataFrame:
+    with get_connection() as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT id, name, barcode, category, unit, quantity
+            FROM items
+            WHERE quantity <= ?
+            ORDER BY quantity ASC, name COLLATE NOCASE
+            """,
+            conn,
+            params=[threshold],
+        )
+    return df
+
+
+def get_daily_transaction_summary(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    query = """
+        SELECT
+            DATE(timestamp) AS tx_date,
+            SUM(CASE WHEN type = 'out' THEN quantity ELSE 0 END) AS checked_out,
+            SUM(CASE WHEN type = 'in' THEN quantity ELSE 0 END) AS restocked
+        FROM transactions
+        WHERE 1=1
+    """
+    params: list[Any] = []
+
+    if start_date:
+        query += " AND DATE(timestamp) >= DATE(?)"
+        params.append(start_date)
+    if end_date:
+        query += " AND DATE(timestamp) <= DATE(?)"
+        params.append(end_date)
+
+    query += """
+        GROUP BY DATE(timestamp)
+        ORDER BY DATE(timestamp) ASC
+    """
+
+    with get_connection() as conn:
+        df = pd.read_sql_query(query, conn, params=params)
+    return df
+
+
+def get_daily_scan_out_summary(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    query = """
+        SELECT
+            DATE(timestamp) AS tx_date,
+            SUM(quantity) AS total_scanned_out
+        FROM transactions
+        WHERE type = 'out'
+    """
+    params: list[Any] = []
+
+    if start_date:
+        query += " AND DATE(timestamp) >= DATE(?)"
+        params.append(start_date)
+    if end_date:
+        query += " AND DATE(timestamp) <= DATE(?)"
+        params.append(end_date)
+
+    query += """
+        GROUP BY DATE(timestamp)
+        ORDER BY DATE(timestamp) ASC
+    """
+
+    with get_connection() as conn:
+        df = pd.read_sql_query(query, conn, params=params)
+    return df
+
+
+def get_busiest_scan_out_day(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict[str, str | int | None]:
+    query = """
+        SELECT
+            DATE(timestamp) AS tx_date,
+            SUM(quantity) AS total_scanned_out
+        FROM transactions
+        WHERE type = 'out'
+    """
+    params: list[Any] = []
+
+    if start_date:
+        query += " AND DATE(timestamp) >= DATE(?)"
+        params.append(start_date)
+    if end_date:
+        query += " AND DATE(timestamp) <= DATE(?)"
+        params.append(end_date)
+
+    query += """
+        GROUP BY DATE(timestamp)
+        ORDER BY total_scanned_out DESC, DATE(timestamp) ASC
+        LIMIT 1
+    """
+
+    with get_connection() as conn:
+        row = conn.execute(query, params).fetchone()
+
+    if row is None:
+        return {"tx_date": None, "total_scanned_out": 0}
+    return {"tx_date": row["tx_date"], "total_scanned_out": int(row["total_scanned_out"])}
+
+
 def get_stock_over_time(item_id: int) -> pd.DataFrame:
     with get_connection() as conn:
         tx_df = pd.read_sql_query(
@@ -331,9 +554,13 @@ def import_items_from_csv(file_obj: Any) -> dict[str, Any]:
         if pd.isna(raw_barcode) or pd.isna(raw_name):
             errors.append(f"Row {line_no}: name and barcode are required.")
             continue
-        barcode = str(raw_barcode).strip()
-        name = str(raw_name).strip()
-        if not barcode or not name:
+        barcode = normalize_barcode(raw_barcode)
+        try:
+            name = _require_text(raw_name, "Item name")
+        except ValueError:
+            errors.append(f"Row {line_no}: name and barcode cannot be empty.")
+            continue
+        if not barcode:
             errors.append(f"Row {line_no}: name and barcode cannot be empty.")
             continue
         if barcode in seen_in_file:

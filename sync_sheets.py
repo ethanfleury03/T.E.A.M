@@ -60,13 +60,13 @@ def sync_to_sheets() -> None:
         return
 
     try:
-        from database import get_all_items, get_transactions
+        from database import get_item_sheet_summary, get_transactions
 
         client = _get_client()
         spreadsheet = client.open_by_url(SPREADSHEET_URL)
 
-        items_df = get_all_items()
-        items_ws = _ensure_worksheet(spreadsheet, "Inventory", cols=len(items_df.columns) or 5)
+        items_df = get_item_sheet_summary()
+        items_ws = _ensure_worksheet(spreadsheet, "Item Sheet", cols=len(items_df.columns) or 6)
         _push_dataframe(items_ws, items_df)
 
         tx_df = get_transactions()

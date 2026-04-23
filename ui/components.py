@@ -4,33 +4,21 @@ from collections.abc import Iterable
 
 import streamlit as st
 
-from database import SETTINGS
-
 
 def render_sidebar(active_page: str) -> int:
     with st.sidebar:
         st.markdown('<div class="brand-title">Niagara Pantry</div>', unsafe_allow_html=True)
         st.markdown(
-            '<div class="brand-subtitle">Track what leaves the pantry — restocking is secondary</div>',
+            '<div class="brand-subtitle">Track what leaves the pantry through scan-outs</div>',
             unsafe_allow_html=True,
         )
 
         st.divider()
-        st.caption("Utilities")
-        default_threshold = int(st.session_state.get("low_stock_threshold", SETTINGS["LOW_STOCK_THRESHOLD"]))
-        threshold = st.slider(
-            "Low stock threshold",
-            min_value=0,
-            max_value=50,
-            value=default_threshold,
-            help="Used for visual warnings across pages.",
-        )
-        st.session_state["low_stock_threshold"] = threshold
-
-        st.divider()
+        st.caption("Demo flow")
+        st.markdown("Add items once, then scan items as they leave.")
         st.caption(f"Active: {active_page}")
         st.markdown('<span class="status-pill status-ok">Connected</span>', unsafe_allow_html=True)
-    return threshold
+    return 0
 
 
 def render_page_header(title: str, subtitle: str, actions: Iterable[dict] | None = None) -> dict[str, bool]:
